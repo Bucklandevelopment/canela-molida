@@ -1,0 +1,15 @@
+{
+  "name": "canela-molida",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "prestart":"echo Jessie",
+    "start": "node index.js",
+    "poststart": "echo canela molida",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
