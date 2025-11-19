@@ -11,5 +11,11 @@
     "start": "node index.js",
     "poststart": "echo canela molida",
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "flowers": "^1.1.0"
+  },
+  "dependencies": {
+    "anime": "^0.1.2"
   }
 }
