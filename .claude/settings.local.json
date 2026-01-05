@@ -8,7 +8,9 @@
       "Bash(tree:*)",
       "Bash(./scripts/setup.sh:*)",
       "Bash(ollama pull:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

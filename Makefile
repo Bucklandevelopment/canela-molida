@@ -104,7 +104,7 @@ dev: $(VENV)/bin/activate
 
 frontend: $(VENV)/bin/activate
 	@echo "$(CYAN)Iniciando frontend en http://localhost:8501$(RESET)"
-	$(STREAMLIT) run frontend/app.py --server.port 8501 --server.address 0.0.0.0
+	$(STREAMLIT) run frontend/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
 
 run-all: $(VENV)/bin/activate
 	@echo "$(CYAN)======================================$(RESET)"
@@ -119,7 +119,7 @@ run-all: $(VENV)/bin/activate
 	@echo ""
 	@trap 'kill 0' INT; \
 	$(UVICORN) app.main:app --host 0.0.0.0 --port 3690 & \
-	$(STREAMLIT) run frontend/app.py --server.port 8501 --server.address 0.0.0.0 & \
+	$(STREAMLIT) run frontend/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true & \
 	wait
 
 # ============================================================================
@@ -207,12 +207,25 @@ docker-ps:
 
 grobid-start:
 	@echo "$(CYAN)Iniciando GROBID...$(RESET)"
-	docker run -d --name grobid -p 8070:8070 grobid/grobid:0.8.2-full
-	@echo "$(GREEN)GROBID disponible en http://localhost:8070$(RESET)"
+	@# Mac ARM64: usar imagen CRF multi-arch nativa (sin deep learning)
+	@# x86/amd64: usar imagen full con deep learning
+	@if [ "$$(uname -m)" = "arm64" ]; then \
+		echo "$(YELLOW)Detectado Mac ARM64 - usando GROBID CRF (nativo, sin deep learning)$(RESET)"; \
+		docker run -d --name grobid -p 8070:8070 \
+			lfoppiano/grobid:latest-crf-multi-arch; \
+	else \
+		echo "Usando GROBID Full (con deep learning)"; \
+		docker run -d --name grobid -p 8070:8070 grobid/grobid:0.8.2-full; \
+	fi
+	@echo "$(GREEN)GROBID iniciando en http://localhost:8070$(RESET)"
+	@echo "$(YELLOW)Nota: GROBID tarda ~15-30s en estar listo$(RESET)"
+	@echo "$(CYAN)Verificar estado: curl http://localhost:8070/api/isalive$(RESET)"
 
 grobid-stop:
 	@echo "$(CYAN)Deteniendo GROBID...$(RESET)"
-	docker stop grobid && docker rm grobid
+	@docker stop grobid 2>/dev/null || true
+	@docker rm grobid 2>/dev/null || true
+	@echo "$(GREEN)GROBID detenido$(RESET)"
 
 # ============================================================================
 # Limpieza

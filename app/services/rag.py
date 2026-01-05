@@ -368,8 +368,10 @@ class RAGService:
             client = ollama.Client(host=self._ollama_host)
 
             # Listar modelos instalados
-            models = client.list()
-            available = [m["name"].split(":")[0] for m in models.get("models", [])]
+            # El cliente retorna un objeto ListResponse con atributo .models
+            # Cada modelo es un objeto Model con atributo .model (nombre completo)
+            response = client.list()
+            available = [m.model.split(":")[0] for m in response.models]
 
             # Verificar modelo principal
             if self._llm_model.split(":")[0] in available:

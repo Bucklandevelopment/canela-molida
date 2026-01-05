@@ -16,8 +16,8 @@ de alta dimensión donde la distancia semántica se traduce a distancia geométr
     │                    ESPACIO DE EMBEDDINGS                               │
     │                                                                        │
     │    "machine learning"  ─────●                                         │
-    │                              \                                         │
-    │                               \  distancia pequeña = semántica similar │
+    │                              \\                                        │
+    │                               \\  distancia pequeña = semántica similar│
     │                                ●───── "deep learning"                  │
     │                                                                        │
     │                                                                        │
@@ -344,11 +344,14 @@ class EmbeddingService:
 
         try:
             # Listar modelos instalados en Ollama
-            # Formato: {"models": [{"name": "bge-m3:latest", ...}, ...]}
-            models = self._client.list()
+            # El cliente retorna un objeto ListResponse con atributo .models
+            # Cada modelo es un objeto Model con atributo .model (nombre completo)
+            response = self._client.list()
 
             # Extraer solo el nombre base (sin :latest)
-            available = [m["name"].split(":")[0] for m in models.get("models", [])]
+            # response.models es una lista de objetos Model
+            # m.model contiene el nombre completo (ej: "bge-m3:latest")
+            available = [m.model.split(":")[0] for m in response.models]
 
             # Verificar si el modelo principal está disponible
             self._model_available = self.model in available

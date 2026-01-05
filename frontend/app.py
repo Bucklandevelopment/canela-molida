@@ -180,7 +180,7 @@ def init_session_state():
 
         ┌─────────────────────────────────────────────────────────────┐
         │                     STREAMLIT PROCESS                        │
-        │  ┌─────────────────────────────────────────────────────┐    │
+        │  ┌─────────────────────────────────────────────────────────┐    │
         │  │               SESSION STATE (dict)                   │    │
         │  │  {                                                   │    │
         │  │      "messages": [...],  # Historial del chat       │    │
@@ -216,6 +216,13 @@ def init_session_state():
     papers: list[dict]
         - Papers actualmente cargados (para futuras features)
         - Reservado para cachear resultados de búsqueda
+
+    first_visit: bool
+        - True si es la primera visita del usuario
+        - Se usa para mostrar tutorial inicial
+
+    tutorial_dismissed: bool
+        - True si el usuario ha cerrado el tutorial
     """
     # Inicializar historial de chat si no existe
     # Cada mensaje es un dict con role (user/assistant) y content
@@ -225,6 +232,14 @@ def init_session_state():
     # Inicializar lista de papers (para caché de búsquedas)
     if "papers" not in st.session_state:
         st.session_state.papers = []
+
+    # Tutorial: primera visita
+    if "first_visit" not in st.session_state:
+        st.session_state.first_visit = True
+
+    # Tutorial: si el usuario lo ha cerrado
+    if "tutorial_dismissed" not in st.session_state:
+        st.session_state.tutorial_dismissed = False
 
 
 # =============================================================================
@@ -317,6 +332,147 @@ def api_request(endpoint: str, method: str = "GET", **kwargs) -> dict:
 
 
 # =============================================================================
+# TUTORIAL Y AYUDA - Guías para usuarios nuevos
+# =============================================================================
+
+def get_indexed_chunks_count() -> int:
+    """
+    Obtiene el número de chunks indexados en el sistema.
+    Retorna 0 si hay error de conexión.
+    """
+    try:
+        stats = api_request("/stats")
+        return stats.get("vectorstore", {}).get("chunks_count", 0)
+    except Exception:
+        return 0
+
+
+def show_welcome_tutorial():
+    """
+    Muestra el tutorial de bienvenida para usuarios nuevos.
+    Solo se muestra una vez por sesión.
+    """
+    if st.session_state.first_visit and not st.session_state.tutorial_dismissed:
+        st.session_state.first_visit = False
+
+        # Toast de bienvenida
+        st.toast("👋 ¡Bienvenido a Scientific Library RAG!", icon="📚")
+
+        # Verificar si hay papers
+        chunks = get_indexed_chunks_count()
+        if chunks == 0:
+            st.toast("📥 Primero ve a 'Ingest' para añadir papers", icon="💡")
+
+
+def show_empty_library_warning():
+    """
+    Muestra un banner de advertencia si la biblioteca está vacía.
+    """
+    chunks = get_indexed_chunks_count()
+    if chunks == 0:
+        st.warning(
+            "**📚 Tu biblioteca está vacía.** "
+            "Ve a la sección **'Ingest'** para añadir papers antes de hacer preguntas. "
+            "Puedes subir PDFs locales o descargar papers de arXiv."
+        )
+        return True
+    return False
+
+
+def show_page_tip(page: str):
+    """
+    Muestra un toast con información sobre la página actual.
+    Solo se muestra una vez por página por sesión.
+    """
+    tip_key = f"tip_shown_{page}"
+    if tip_key not in st.session_state:
+        st.session_state[tip_key] = True
+
+        tips = {
+            "Chat": "💬 Haz preguntas sobre los papers que has indexado",
+            "Search": "🔍 Busca papers en tu biblioteca local o en OpenAlex/arXiv",
+            "Ingest": "📥 Añade papers: sube PDFs o descarga de arXiv",
+            "Prizes": "🏆 Explora premios científicos: Nobel, Fields, Turing...",
+            "Stats": "📊 Ve estadísticas de tu biblioteca y sistema",
+        }
+
+        if page in tips:
+            st.toast(tips[page], icon="💡")
+
+
+# =============================================================================
+# GROBID STATUS - Verificación del servicio GROBID
+# =============================================================================
+
+GROBID_URL = "http://localhost:8070"
+
+
+def check_grobid_status() -> bool:
+    """
+    Verifica si GROBID está disponible y listo.
+    Retorna True si responde al endpoint /api/isalive.
+    """
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            response = client.get(f"{GROBID_URL}/api/isalive")
+            return response.status_code == 200
+    except Exception:
+        return False
+
+
+def render_grobid_status_widget(widget_key: str = "default"):
+    """
+    Renderiza un widget que muestra el estado de GROBID.
+    Si no está listo, muestra instrucciones y un botón para verificar.
+
+    Args:
+        widget_key: Key único para evitar conflictos entre widgets
+
+    Returns:
+        bool: True si GROBID está disponible, False si no
+    """
+    # Inicializar estado de GROBID en session_state
+    if "grobid_status" not in st.session_state:
+        st.session_state.grobid_status = None
+
+    # Verificar estado actual
+    is_available = check_grobid_status()
+    st.session_state.grobid_status = is_available
+
+    # Crear contenedor para el widget
+    status_container = st.container()
+
+    with status_container:
+        if is_available:
+            st.success("✅ **GROBID listo** - Extracción de metadatos habilitada")
+            return True
+        else:
+            # GROBID no disponible - mostrar opciones
+            st.warning(
+                "⏳ **GROBID no disponible** - El servicio no está corriendo o aún está iniciando.\n\n"
+                "**Opciones:**\n"
+                "1. Inicia GROBID: `make grobid-start` (tarda ~60s en estar listo)\n"
+                "2. Desmarca la opción 'Use GROBID' para procesar sin metadatos avanzados"
+            )
+
+            # Botón para verificar manualmente
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                if st.button("🔄 Verificar", key=f"check_grobid_{widget_key}"):
+                    is_available = check_grobid_status()
+                    if is_available:
+                        st.toast("✅ GROBID está listo!", icon="✅")
+                        st.rerun()
+                    else:
+                        st.toast("⏳ GROBID aún no está listo", icon="⏳")
+
+            with col2:
+                st.caption("GROBID tarda ~60 segundos en iniciar después de `make grobid-start`")
+
+            return False
+
+
+# =============================================================================
 # PÁGINA: CHAT - Interfaz conversacional RAG
 # =============================================================================
 
@@ -383,6 +539,13 @@ def render_chat():
     """
     # Título de la sección
     st.header("Ask the Library")
+
+    # Mostrar warning si no hay papers indexados
+    if show_empty_library_warning():
+        st.info(
+            "**💡 Consejo:** Prueba a descargar el paper de Transformers: "
+            "ve a **Ingest → From arXiv** e introduce el ID `1706.03762`"
+        )
 
     # =========================================================================
     # RENDERIZAR HISTORIAL DE MENSAJES
@@ -712,6 +875,23 @@ def render_ingest():
     """
     st.header("Ingest Papers")
 
+    # Guía rápida para usuarios nuevos
+    with st.expander("📖 Guía rápida", expanded=False):
+        st.markdown("""
+        **¿Cómo funciona?**
+
+        1. **Sube un PDF** o **introduce un ID de arXiv**
+        2. El sistema extrae el texto del documento
+        3. Lo divide en fragmentos (chunks) de ~1000 caracteres
+        4. Genera embeddings vectoriales con BGE-M3
+        5. Los indexa en la base de datos para búsqueda semántica
+
+        **Ejemplo de ID de arXiv:** `1706.03762` (Paper de Transformers)
+
+        **GROBID (opcional):** Si tienes GROBID corriendo (`make grobid-start`),
+        se extraerán metadatos más ricos (título, autores, abstract por separado).
+        """)
+
     # Dos métodos de ingestión en pestañas separadas
     tab1, tab2 = st.tabs(["Upload PDF", "From arXiv"])
 
@@ -729,8 +909,13 @@ def render_ingest():
         # Checkbox para GROBID (extracción de metadatos avanzada)
         use_grobid = st.checkbox("Use GROBID for metadata", value=True)
 
+        # Mostrar estado de GROBID si está habilitado
+        grobid_ready = True
+        if use_grobid:
+            grobid_ready = render_grobid_status_widget("pdf_upload")
+
         # Procesar cuando hay archivo Y se presiona el botón
-        if st.button("Process PDF") and uploaded_file:
+        if st.button("Process PDF", disabled=(use_grobid and not grobid_ready)) and uploaded_file:
             with st.spinner("Processing PDF..."):
                 try:
                     # Preparar archivo para multipart upload
@@ -758,55 +943,211 @@ def render_ingest():
                     st.error(f"Processing failed: {e}")
 
     # =========================================================================
-    # PESTAÑA 2: INGESTIÓN DESDE ARXIV (BATCH)
+    # PESTAÑA 2: INGESTIÓN DESDE ARXIV (CON PREVIEW)
     # =========================================================================
     with tab2:
+        st.markdown("**Introduce IDs de arXiv para ver información antes de ingestar**")
+
         # Text area para múltiples IDs (uno por línea)
         arxiv_ids = st.text_area(
             "arXiv IDs (one per line)",
-            placeholder="2301.00001\n2301.00002\n...",
+            placeholder="1706.03762\n2301.00001\n...",
+            help="Introduce uno o más IDs de arXiv. Ejemplo: 1706.03762 (Transformers)",
         )
 
-        # GROBID checkbox con key diferente para evitar conflicto
-        use_grobid = st.checkbox("Use GROBID for metadata", value=True, key="grobid_arxiv")
+        # Inicializar estado para papers previsualizados
+        if "arxiv_previews" not in st.session_state:
+            st.session_state.arxiv_previews = []
+        if "arxiv_selected" not in st.session_state:
+            st.session_state.arxiv_selected = set()
 
-        if st.button("Ingest from arXiv"):
-            # Parsear IDs: split por línea, strip espacios, filtrar vacíos
-            ids = [id.strip() for id in arxiv_ids.split("\n") if id.strip()]
+        # Botón para previsualizar
+        col_preview, col_clear = st.columns([1, 1])
+        with col_preview:
+            if st.button("🔍 Preview Papers", key="btn_preview_arxiv"):
+                ids = [id.strip() for id in arxiv_ids.split("\n") if id.strip()]
+                if ids:
+                    st.session_state.arxiv_previews = []
+                    st.session_state.arxiv_selected = set()
 
-            if ids:
-                # Barra de progreso para batch processing
+                    progress = st.progress(0)
+                    for i, arxiv_id in enumerate(ids):
+                        try:
+                            # Obtener metadatos del paper
+                            paper = api_request(f"/papers/by-arxiv/{arxiv_id}")
+                            st.session_state.arxiv_previews.append(paper)
+                            st.session_state.arxiv_selected.add(arxiv_id)
+                        except Exception as e:
+                            st.session_state.arxiv_previews.append({
+                                "arxiv_id": arxiv_id,
+                                "error": str(e)
+                            })
+                        progress.progress((i + 1) / len(ids))
+                    st.rerun()
+
+        with col_clear:
+            if st.button("🗑️ Clear Preview", key="btn_clear_preview"):
+                st.session_state.arxiv_previews = []
+                st.session_state.arxiv_selected = set()
+                st.rerun()
+
+        # Mostrar papers previsualizados
+        if st.session_state.arxiv_previews:
+            st.markdown("---")
+            st.subheader(f"📄 Papers encontrados ({len(st.session_state.arxiv_previews)})")
+
+            for paper in st.session_state.arxiv_previews:
+                arxiv_id = paper.get("arxiv_id", "unknown")
+
+                if "error" in paper:
+                    st.error(f"❌ **{arxiv_id}**: {paper['error']}")
+                    continue
+
+                # Checkbox para seleccionar
+                is_selected = st.checkbox(
+                    f"**{paper.get('title', 'Sin título')}**",
+                    value=arxiv_id in st.session_state.arxiv_selected,
+                    key=f"select_{arxiv_id}"
+                )
+
+                # Actualizar selección
+                if is_selected:
+                    st.session_state.arxiv_selected.add(arxiv_id)
+                else:
+                    st.session_state.arxiv_selected.discard(arxiv_id)
+
+                # Mostrar detalles en expander
+                with st.expander(f"📋 Detalles: {arxiv_id}", expanded=False):
+                    # Autores
+                    authors = paper.get("authors", [])
+                    if authors:
+                        author_names = ", ".join(a.get("name", "") for a in authors[:5])
+                        if len(authors) > 5:
+                            author_names += f" (+{len(authors) - 5} more)"
+                        st.markdown(f"**Autores:** {author_names}")
+
+                    # Fecha y categorías
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Publicado:** {paper.get('year', 'N/A')}")
+                    with col2:
+                        cats = paper.get("arxiv_categories", [])
+                        st.markdown(f"**Categorías:** {', '.join(cats[:3])}")
+
+                    # Abstract
+                    abstract = paper.get("abstract", "")
+                    if abstract:
+                        st.markdown("**Abstract:**")
+                        st.caption(abstract[:500] + ("..." if len(abstract) > 500 else ""))
+
+                    # Link al PDF
+                    pdf_url = paper.get("pdf_url", "")
+                    if pdf_url:
+                        st.markdown(f"[📥 Ver PDF en arXiv]({pdf_url})")
+
+            # Sección de ingestión
+            st.markdown("---")
+            selected_count = len(st.session_state.arxiv_selected)
+            st.markdown(f"**Papers seleccionados:** {selected_count}")
+
+            # GROBID checkbox
+            use_grobid_arxiv = st.checkbox(
+                "Use GROBID for metadata",
+                value=True,
+                key="grobid_arxiv"
+            )
+
+            # Mostrar estado de GROBID si está habilitado
+            grobid_ready_arxiv = True
+            if use_grobid_arxiv:
+                grobid_ready_arxiv = render_grobid_status_widget("arxiv_ingest")
+
+            # Botón de ingestión
+            can_ingest = selected_count > 0 and (not use_grobid_arxiv or grobid_ready_arxiv)
+
+            if st.button(
+                f"📥 Ingest {selected_count} Selected Papers",
+                disabled=not can_ingest,
+                key="btn_ingest_selected"
+            ):
+                ids = list(st.session_state.arxiv_selected)
                 progress = st.progress(0)
                 results = []
 
-                # Procesar cada ID secuencialmente
                 for i, arxiv_id in enumerate(ids):
                     with st.spinner(f"Processing {arxiv_id}..."):
                         try:
                             result = api_request(
                                 f"/ingest/arxiv/{arxiv_id}",
                                 method="POST",
-                                json={"use_grobid": use_grobid},
+                                json={"use_grobid": use_grobid_arxiv},
                             )
-                            # Guardar resultado exitoso
                             results.append({"arxiv_id": arxiv_id, "status": "success", **result})
                         except Exception as e:
-                            # Guardar error pero continuar con los demás
                             results.append({"arxiv_id": arxiv_id, "status": "error", "error": str(e)})
 
-                    # Actualizar barra de progreso (0.0 a 1.0)
                     progress.progress((i + 1) / len(ids))
 
-                # Mostrar resumen final
+                # Mostrar resumen
                 success = sum(1 for r in results if r["status"] == "success")
-                st.success(f"Processed {success}/{len(ids)} papers")
+                st.success(f"✅ Ingested {success}/{len(ids)} papers")
 
-                # Detalles de cada resultado
                 for r in results:
                     if r["status"] == "success":
-                        st.markdown(f"- {r['arxiv_id']}: {r.get('chunks_count', 0)} chunks")
+                        st.markdown(f"- ✅ {r['arxiv_id']}: {r.get('chunks_count', 0)} chunks")
                     else:
-                        st.markdown(f"- {r['arxiv_id']}: Error - {r.get('error')}")
+                        st.markdown(f"- ❌ {r['arxiv_id']}: {r.get('error')}")
+
+                # Limpiar selección después de ingestar
+                st.session_state.arxiv_previews = []
+                st.session_state.arxiv_selected = set()
+
+        else:
+            # Modo rápido sin preview (para usuarios avanzados)
+            with st.expander("⚡ Modo rápido (sin preview)", expanded=False):
+                st.caption("Ingesta directa sin ver la información primero")
+
+                use_grobid_quick = st.checkbox(
+                    "Use GROBID",
+                    value=True,
+                    key="grobid_quick"
+                )
+
+                grobid_ready_quick = True
+                if use_grobid_quick:
+                    grobid_ready_quick = render_grobid_status_widget("arxiv_quick")
+
+                if st.button(
+                    "⚡ Ingest Directly",
+                    disabled=(use_grobid_quick and not grobid_ready_quick),
+                    key="btn_quick_ingest"
+                ):
+                    ids = [id.strip() for id in arxiv_ids.split("\n") if id.strip()]
+                    if ids:
+                        progress = st.progress(0)
+                        results = []
+
+                        for i, arxiv_id in enumerate(ids):
+                            with st.spinner(f"Processing {arxiv_id}..."):
+                                try:
+                                    result = api_request(
+                                        f"/ingest/arxiv/{arxiv_id}",
+                                        method="POST",
+                                        json={"use_grobid": use_grobid_quick},
+                                    )
+                                    results.append({"arxiv_id": arxiv_id, "status": "success", **result})
+                                except Exception as e:
+                                    results.append({"arxiv_id": arxiv_id, "status": "error", "error": str(e)})
+                            progress.progress((i + 1) / len(ids))
+
+                        success = sum(1 for r in results if r["status"] == "success")
+                        st.success(f"Processed {success}/{len(ids)} papers")
+
+                        for r in results:
+                            if r["status"] == "success":
+                                st.markdown(f"- ✅ {r['arxiv_id']}: {r.get('chunks_count', 0)} chunks")
+                            else:
+                                st.markdown(f"- ❌ {r['arxiv_id']}: {r.get('error')}")
 
 
 # =============================================================================
@@ -879,7 +1220,7 @@ def render_prizes():
         )
 
         # Filtro por año (Nobel empezó en 1901)
-        year = col2.number_input("Year", value=None, min_value=1901, max_value=2024, key="nobel_year")
+        year = col2.number_input("Year", value=None, min_value=1901, max_value=datetime.now().year, key="nobel_year")
 
         if st.button("Search Nobel Laureates"):
             with st.spinner("Fetching from Nobel API..."):
@@ -917,7 +1258,7 @@ def render_prizes():
         st.subheader("Fields Medal Winners")
 
         # Fields Medal se otorga cada 4 años desde 1936
-        year = st.number_input("Year", value=None, min_value=1936, max_value=2024, key="fields_year")
+        year = st.number_input("Year", value=None, min_value=1936, max_value=datetime.now().year, key="fields_year")
 
         if st.button("Search Fields Medal"):
             with st.spinner("Fetching from Wikidata..."):
@@ -945,7 +1286,7 @@ def render_prizes():
         st.subheader("Turing Award Winners")
 
         # Turing Award desde 1966
-        year = st.number_input("Year", value=None, min_value=1966, max_value=2024, key="turing_year")
+        year = st.number_input("Year", value=None, min_value=1966, max_value=datetime.now().year, key="turing_year")
 
         if st.button("Search Turing Award"):
             with st.spinner("Fetching from Wikidata..."):
@@ -983,7 +1324,7 @@ def render_prizes():
 
         # Input para Q-ID (con default al Abel Prize)
         qid = st.text_input("Prize Q-ID", value="Q160042")
-        year = st.number_input("Year", value=None, min_value=1900, max_value=2024, key="other_year")
+        year = st.number_input("Year", value=None, min_value=1900, max_value=datetime.now().year, key="other_year")
 
         if st.button("Search Prize"):
             with st.spinner("Fetching from Wikidata..."):
@@ -1237,8 +1578,16 @@ def main():
         st.sidebar.caption("Start API with: uvicorn app.main:app")
 
     # =========================================================================
+    # TUTORIAL DE BIENVENIDA (solo primera visita)
+    # =========================================================================
+    show_welcome_tutorial()
+
+    # =========================================================================
     # RENDERIZAR PÁGINA SELECCIONADA
     # =========================================================================
+    # Mostrar tip de la página actual
+    show_page_tip(page)
+
     # Cada página tiene su propia función de render
     if page == "Chat":
         render_chat()      # Interfaz conversacional RAG

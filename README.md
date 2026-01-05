@@ -89,6 +89,72 @@ make grobid-start
 
 ---
 
+## Primeros Pasos: Como usar la aplicacion
+
+**IMPORTANTE:** Este es un sistema RAG (Retrieval Augmented Generation). Necesitas **ingestar papers primero** antes de poder hacer preguntas sobre ellos.
+
+### Flujo de uso
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        FLUJO DE USO DEL SISTEMA                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   1. INGESTAR PAPERS                                                    │
+│      │                                                                  │
+│      ├── Subir PDF local (seccion "Ingest")                            │
+│      │   └── Sube archivos PDF desde tu ordenador                      │
+│      │                                                                  │
+│      └── Descargar de arXiv (seccion "Ingest")                         │
+│          └── Introduce IDs de arXiv (ej: 2301.00001)                   │
+│                                                                         │
+│                          ▼                                              │
+│                                                                         │
+│   2. EL SISTEMA PROCESA LOS PAPERS                                      │
+│      │                                                                  │
+│      ├── Extrae texto del PDF                                          │
+│      ├── Divide en chunks de ~1000 caracteres                          │
+│      ├── Genera embeddings con BGE-M3                                  │
+│      └── Indexa en la base de datos vectorial (LanceDB)                │
+│                                                                         │
+│                          ▼                                              │
+│                                                                         │
+│   3. HAZ PREGUNTAS (seccion "Chat")                                     │
+│      │                                                                  │
+│      └── El sistema busca chunks relevantes en tus papers              │
+│          y genera respuestas basadas en ese contexto                   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Ejemplo practico
+
+1. **Abre la aplicacion:** http://localhost:8501
+
+2. **Ve a "Ingest"** y descarga un paper de arXiv:
+   ```
+   arXiv ID: 1706.03762
+   ```
+   (Este es "Attention Is All You Need", el paper de Transformers)
+
+3. **Espera a que procese** (~30-60 segundos)
+
+4. **Ve a "Chat"** y pregunta:
+   ```
+   What is the main contribution of the Transformer architecture?
+   ```
+
+5. **El sistema responde** usando el contenido del paper que acabas de ingestar.
+
+### Sin papers = sin respuestas
+
+Si haces una pregunta sin haber ingestado papers, el sistema no tendra contexto para responder. Puedes verificar cuantos papers tienes indexados en la seccion **"Stats"**:
+
+- `Indexed Chunks: 0` = No hay papers, necesitas ingestar
+- `Indexed Chunks: 150` = Tienes papers indexados, puedes hacer preguntas
+
+---
+
 ## Comandos Disponibles
 
 Ejecuta `make help` para ver todos los comandos. Aqui estan organizados por categoria:
