@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(rm:*)",
+      "Bash(mkdir:*)",
+      "Bash(chmod:*)",
+      "Bash(tree:*)",
+      "Bash(./scripts/setup.sh:*)",
+      "Bash(ollama pull:*)",
+      "Bash(pkill:*)"
+    ]
+  }
+}

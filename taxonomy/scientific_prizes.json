@@ -1,0 +1,177 @@
+{
+  "description": "Scientific prizes with Wikidata IDs for SPARQL queries",
+  "prizes": {
+    "mathematics": [
+      {
+        "name": "Fields Medal",
+        "wikidata_id": "Q28835",
+        "founded": 1936,
+        "frequency": "Every 4 years",
+        "value": "CA$15,000",
+        "age_limit": "Under 40",
+        "notes": "Highest honor in mathematics"
+      },
+      {
+        "name": "Abel Prize",
+        "wikidata_id": "Q160042",
+        "founded": 2003,
+        "frequency": "Annual",
+        "value": "~$873,000",
+        "notes": "Norwegian Academy of Science and Letters"
+      },
+      {
+        "name": "Wolf Prize in Mathematics",
+        "wikidata_id": "Q194351",
+        "founded": 1978,
+        "frequency": "Annual",
+        "value": "$100,000"
+      },
+      {
+        "name": "Breakthrough Prize in Mathematics",
+        "wikidata_id": "Q15046788",
+        "founded": 2013,
+        "frequency": "Annual",
+        "value": "$3,000,000"
+      },
+      {
+        "name": "Shaw Prize in Mathematical Sciences",
+        "wikidata_id": "Q1364558",
+        "founded": 2004,
+        "frequency": "Annual",
+        "value": "$1,200,000"
+      }
+    ],
+    "physics": [
+      {
+        "name": "Nobel Prize in Physics",
+        "wikidata_id": "Q38104",
+        "founded": 1901,
+        "frequency": "Annual",
+        "value": "~$1,000,000",
+        "api": "api.nobelprize.org"
+      },
+      {
+        "name": "Wolf Prize in Physics",
+        "wikidata_id": "Q694251",
+        "founded": 1978,
+        "frequency": "Annual",
+        "value": "$100,000"
+      },
+      {
+        "name": "Breakthrough Prize in Fundamental Physics",
+        "wikidata_id": "Q16988195",
+        "founded": 2012,
+        "frequency": "Annual",
+        "value": "$3,000,000"
+      },
+      {
+        "name": "Dirac Medal",
+        "wikidata_id": "Q1227158",
+        "founded": 1985,
+        "frequency": "Annual"
+      },
+      {
+        "name": "Kavli Prize in Astrophysics",
+        "wikidata_id": "Q1164862",
+        "founded": 2008,
+        "frequency": "Biennial",
+        "value": "$1,000,000"
+      }
+    ],
+    "chemistry": [
+      {
+        "name": "Nobel Prize in Chemistry",
+        "wikidata_id": "Q44585",
+        "founded": 1901,
+        "frequency": "Annual",
+        "value": "~$1,000,000",
+        "api": "api.nobelprize.org"
+      },
+      {
+        "name": "Wolf Prize in Chemistry",
+        "wikidata_id": "Q852298",
+        "founded": 1978,
+        "frequency": "Annual",
+        "value": "$100,000"
+      },
+      {
+        "name": "Priestley Medal",
+        "wikidata_id": "Q1367867",
+        "founded": 1922,
+        "frequency": "Annual",
+        "notes": "American Chemical Society"
+      }
+    ],
+    "computing": [
+      {
+        "name": "Turing Award",
+        "wikidata_id": "Q185667",
+        "founded": 1966,
+        "frequency": "Annual",
+        "value": "$1,000,000",
+        "notes": "ACM, 'Nobel Prize of Computing'"
+      },
+      {
+        "name": "Gödel Prize",
+        "wikidata_id": "Q1541896",
+        "founded": 1993,
+        "frequency": "Annual",
+        "notes": "Theoretical computer science"
+      },
+      {
+        "name": "Knuth Prize",
+        "wikidata_id": "Q1783948",
+        "founded": 1996,
+        "frequency": "Annual",
+        "notes": "Algorithms and theory"
+      }
+    ],
+    "medicine": [
+      {
+        "name": "Nobel Prize in Physiology or Medicine",
+        "wikidata_id": "Q80061",
+        "founded": 1901,
+        "frequency": "Annual",
+        "value": "~$1,000,000",
+        "api": "api.nobelprize.org"
+      },
+      {
+        "name": "Lasker Award (Basic Medical Research)",
+        "wikidata_id": "Q645891",
+        "founded": 1945,
+        "frequency": "Annual",
+        "notes": "Often precedes Nobel"
+      },
+      {
+        "name": "Lasker Award (Clinical Medical Research)",
+        "wikidata_id": "Q645892",
+        "founded": 1945,
+        "frequency": "Annual"
+      },
+      {
+        "name": "Breakthrough Prize in Life Sciences",
+        "wikidata_id": "Q16988211",
+        "founded": 2013,
+        "frequency": "Annual",
+        "value": "$3,000,000"
+      },
+      {
+        "name": "Kavli Prize in Neuroscience",
+        "wikidata_id": "Q1164864",
+        "founded": 2008,
+        "frequency": "Biennial",
+        "value": "$1,000,000"
+      }
+    ],
+    "nanoscience": [
+      {
+        "name": "Kavli Prize in Nanoscience",
+        "wikidata_id": "Q1164863",
+        "founded": 2008,
+        "frequency": "Biennial",
+        "value": "$1,000,000"
+      }
+    ]
+  },
+  "sparql_template": "SELECT ?person ?personLabel (YEAR(?date) as ?year) WHERE { ?person p:P166 ?stmt . ?stmt ps:P166 wd:{QID} . OPTIONAL { ?stmt pq:P585 ?date } SERVICE wikibase:label { bd:serviceParam wikibase:language \"en,es\". } } ORDER BY DESC(?year)"
+}

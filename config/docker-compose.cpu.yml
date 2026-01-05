@@ -1,0 +1,102 @@
+version: '3.8'
+
+# Scientific Library RAG - Docker Compose (CPU only)
+# For systems without NVIDIA GPU
+
+services:
+  # Ollama - Local LLM server (CPU mode)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sci-library-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # No GPU reservation for CPU-only mode
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # GROBID - PDF metadata extraction
+  grobid:
+    image: grobid/grobid:0.8.2-full
+    container_name: sci-library-grobid
+    ports:
+      - "8070:8070"
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8070/api/isalive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # FastAPI Backend
+  api:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.api
+    container_name: sci-library-api
+    ports:
+      - "3690:3690"
+    volumes:
+      - ../data:/app/data
+      - ../metadata:/app/metadata
+      - ../.cache:/app/.cache
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - GROBID_URL=http://grobid:8070
+      - EMBEDDING_MODEL=nomic-embed-text
+      - LLM_MODEL=qwen2:7b
+    depends_on:
+      ollama:
+        condition: service_healthy
+      grobid:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Streamlit Frontend
+  frontend:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.frontend
+    container_name: sci-library-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://api:3690
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # Model initialization (CPU-friendly models)
+  model-init:
+    image: ollama/ollama:latest
+    container_name: sci-library-model-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Pulling nomic-embed-text (lighter embedding model)..."
+        ollama pull nomic-embed-text
+        echo "Pulling Qwen2 7B..."
+        ollama pull qwen2:7b
+        echo "Model initialization complete!"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+
+volumes:
+  ollama_data:
+    name: sci-library-ollama-data
+
+networks:
+  default:
+    name: sci-library-network
