@@ -118,7 +118,7 @@ from typing import Optional
 # THIRD-PARTY IMPORTS: FastAPI
 # =============================================================================
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, UploadFile, File
 # APIRouter: FastAPI router for organizing endpoints
 #
 # HTTPException: Raise HTTP error responses
@@ -178,6 +178,7 @@ router = APIRouter(
 
 @router.post("/pdf")
 async def ingest_pdf(
+    request: Request,
     file: UploadFile = File(...),
     # file: The uploaded PDF file (required)
     # File(...) marks this as file upload, not form field
@@ -314,7 +315,7 @@ async def ingest_pdf(
     # ─────────────────────────────────────────────────────────────────────────
     # Build response
     # ─────────────────────────────────────────────────────────────────────────
-    return {
+    response = {
         "paper_id": paper_id,
         "pdf_path": str(pdf_path),
         "markdown_path": result.get("markdown_path"),
@@ -324,6 +325,25 @@ async def ingest_pdf(
         "metadata": result["metadata"].model_dump() if result["metadata"] else None,
     }
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Publish event to vital-core (fire-and-forget)
+    # ─────────────────────────────────────────────────────────────────────────
+    vital_client = getattr(request.app.state, "vital_client", None)
+    if vital_client is not None:
+        await vital_client.publish_event(
+            category="education",
+            action="create",
+            event_type="paper.ingested",
+            payload={
+                "paper_id": paper_id,
+                "chunks_count": response["chunks_count"],
+                "grobid_used": response["grobid_used"],
+            },
+            tags=["research", "ingestion"],
+        )
+
+    return response
+
 
 # =============================================================================
 # ENDPOINT: INGEST ARXIV PAPER
@@ -331,16 +351,13 @@ async def ingest_pdf(
 
 @router.post("/arxiv/{arxiv_id}")
 async def ingest_arxiv_paper(
+    request: Request,
     arxiv_id: str,
     # arxiv_id: arXiv paper identifier
     # Examples: "2301.08422", "hep-th/9901001"
 
     use_grobid: bool = True,
     # use_grobid: Use GROBID for additional metadata
-
-    background_tasks: BackgroundTasks = None,
-    # background_tasks: For potential async processing
-    # Currently unused but available for future enhancements
 ) -> dict:
     """
     Download and ingest paper from arXiv.
@@ -465,7 +482,7 @@ async def ingest_arxiv_paper(
         # ─────────────────────────────────────────────────────────────────────
         # Build response
         # ─────────────────────────────────────────────────────────────────────
-        return {
+        response = {
             "arxiv_id": arxiv_id,
             "paper_id": clean_id,
             "title": metadata.title,
@@ -476,6 +493,24 @@ async def ingest_arxiv_paper(
             "chunks_count": len(result["chunks"]),
             "indexed_chunks": count,
         }
+
+        # Publish event to vital-core (fire-and-forget)
+        vital_client = getattr(request.app.state, "vital_client", None)
+        if vital_client is not None:
+            await vital_client.publish_event(
+                category="education",
+                action="create",
+                event_type="paper.ingested",
+                payload={
+                    "paper_id": clean_id,
+                    "arxiv_id": arxiv_id,
+                    "title": metadata.title,
+                    "chunks_count": response["chunks_count"],
+                },
+                tags=["research", "ingestion", "arxiv"],
+            )
+
+        return response
 
     finally:
         await arxiv_client.close()
@@ -578,6 +613,80 @@ async def ingest_arxiv_batch(
         "failed": len(errors),
         "results": results,
         "errors": errors,
+    }
+
+
+# =============================================================================
+# ENDPOINT: ASYNC INGEST PDF (BackgroundTasks)
+# =============================================================================
+
+def _ingest_pdf_background(
+    pdf_path: Path,
+    paper_id: str,
+    use_grobid: bool,
+) -> None:
+    """Run PDF ingestion in a background task."""
+    import asyncio
+
+    async def _run():
+        settings = get_settings()
+        processor = get_pdf_processor()
+        vectorstore = get_vectorstore_service()
+
+        result = await processor.process_pdf(
+            pdf_path=pdf_path,
+            paper_id=paper_id,
+            use_grobid=use_grobid,
+        )
+
+        if result["text"]:
+            md_path = settings.markdown_dir / f"{paper_id}.md"
+            md_path.write_text(result["text"])
+
+        if result["chunks"]:
+            vectorstore.add_chunks(result["chunks"])
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()
+
+
+@router.post("/pdf/async")
+async def ingest_pdf_async(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    paper_id: Optional[str] = None,
+    use_grobid: bool = True,
+) -> dict:
+    """
+    Ingest a PDF file in the background.
+
+    Returns immediately with accepted status while processing continues.
+    Useful for large PDFs that would otherwise timeout.
+    """
+    settings = get_settings()
+
+    if not paper_id:
+        paper_id = Path(file.filename).stem
+
+    pdf_path = settings.pdfs_dir / f"{paper_id}.pdf"
+    content = await file.read()
+    pdf_path.write_bytes(content)
+
+    background_tasks.add_task(
+        _ingest_pdf_background,
+        pdf_path=pdf_path,
+        paper_id=paper_id,
+        use_grobid=use_grobid,
+    )
+
+    return {
+        "status": "accepted",
+        "paper_id": paper_id,
+        "pdf_path": str(pdf_path),
+        "message": "PDF ingestion started in background",
     }
 
 

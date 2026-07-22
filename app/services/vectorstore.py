@@ -948,6 +948,26 @@ class VectorStoreService:
     # MÉTODOS PÚBLICOS: ADMINISTRACIÓN
     # -------------------------------------------------------------------------
 
+    def get_chunks_by_paper(
+        self,
+        paper_id: str,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        chunks = (
+            self._chunks_table.search()
+            .where(f"paper_id = '{paper_id}'")
+            .limit(limit)
+            .to_list()
+        )
+        chunks.sort(key=lambda c: int(c.get("chunk_index", 0)))
+        return chunks
+
+    def list_paper_ids(self, limit: int = 500) -> list[str]:
+        df = self._chunks_table.to_pandas()
+        if df.empty or "paper_id" not in df.columns:
+            return []
+        return df["paper_id"].dropna().unique().tolist()[:limit]
+
     def delete_paper(self, paper_id: str) -> int:
         """
         Elimina todos los chunks de un paper.

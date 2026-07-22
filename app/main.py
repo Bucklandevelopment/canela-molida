@@ -137,6 +137,8 @@ Ejecución:
 # ---------------------------------------------------------------------------
 # Standard Library - Utilidades de contexto
 # ---------------------------------------------------------------------------
+import logging
+import os
 from contextlib import asynccontextmanager  # Para el patrón lifespan de FastAPI
 
 # ---------------------------------------------------------------------------
@@ -149,9 +151,19 @@ from fastapi.middleware.cors import CORSMiddleware  # Middleware para CORS heade
 # Local - Configuración y servicios de la aplicación
 # ---------------------------------------------------------------------------
 from app.core.config import get_settings  # Singleton de configuración
-from app.api import papers_router, rag_router, ingest_router, search_router  # Los 4 routers API
+from app.api import (
+    papers_router,
+    rag_router,
+    ingest_router,
+    search_router,
+    instagram_router,
+)
 from app.services.vectorstore import get_vectorstore_service  # Singleton LanceDB
 from app.services.embeddings import get_embedding_service  # Singleton BGE-M3
+from app.services.content.scheduler import get_scheduler  # Instagram scheduler
+from app.integrations.vital_sdk import VitalClient, VitalConfig  # vital-core SDK
+
+log = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -237,22 +249,41 @@ async def lifespan(app: FastAPI):
     get_embedding_service()   # Carga BGE-M3 en GPU/CPU
     get_vectorstore_service() # Conecta a LanceDB
 
+    # 4. Initialize vital-core SDK client (graceful -- does not block startup)
+    vital_client: VitalClient | None = None
+    vital_enabled = os.getenv("VITAL_ENABLED", "true").lower() in ("1", "true", "yes")
+    if vital_enabled:
+        try:
+            vital_config = VitalConfig()  # type: ignore[call-arg]
+            vital_client = VitalClient(config=vital_config)
+            await vital_client.connect()
+            await vital_client.register()
+            log.info("Registered with vital-core as '%s'", vital_config.service_name)
+        except Exception as exc:
+            log.warning("vital-core integration unavailable: %s", exc)
+            vital_client = None
+
+    # Store on app.state so endpoints can publish events
+    app.state.vital_client = vital_client
+
+    # 5. Start Instagram content scheduler (no-op unless enabled in env)
+    content_scheduler = get_scheduler()
+    content_scheduler.start()
+    app.state.content_scheduler = content_scheduler
+
     # =========================================================================
     # YIELD - La app está lista para servir requests
     # =========================================================================
-    yield  # ← Aquí la app corre hasta que se apague
+    yield  # <- La app corre hasta que se apague
 
     # =========================================================================
     # FASE DE SHUTDOWN - Se ejecuta al apagar el servidor
     # =========================================================================
-    # Actualmente no hay cleanup explícito porque:
-    # - LanceDB cierra conexiones automáticamente (RAII pattern)
-    # - diskcache persiste automáticamente
-    # - Ollama corre como servicio separado
-    #
-    # Si necesitaras cleanup, iría aquí:
-    # await vectorstore_service.close()
-    # await embedding_service.unload_model()
+    content_scheduler.shutdown()
+
+    if vital_client is not None:
+        await vital_client.disconnect()
+        log.info("Disconnected from vital-core")
 
 
 # =============================================================================
@@ -365,32 +396,16 @@ app = FastAPI(
 # CONFIGURACIÓN DE CORS:
 # ======================
 
+ALLOWED_ORIGINS = os.getenv(
+    "CORS_ORIGINS", "http://localhost:8501,http://localhost:3690,http://localhost:8888"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-
-    # allow_origins: Lista de orígenes permitidos
-    # "*" = cualquier origen (permisivo, ok para desarrollo local)
-    # Producción: ["http://localhost:8501", "https://miapp.com"]
-    allow_origins=["*"],
-
-    # allow_credentials: Permitir cookies y headers de autenticación
-    # True = envía cookies cross-origin
-    # NOTA: Si es True, allow_origins NO puede ser ["*"] en producción
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-
-    # allow_methods: Métodos HTTP permitidos
-    # "*" = todos (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD)
-    # Específico: ["GET", "POST"]
     allow_methods=["*"],
-
-    # allow_headers: Headers custom permitidos en requests
-    # "*" = cualquier header
-    # Específico: ["Content-Type", "Authorization"]
     allow_headers=["*"],
-
-    # Otros parámetros útiles no usados:
-    # expose_headers=["X-Custom-Header"]  # Headers visibles al frontend
-    # max_age=600  # Cache del preflight en segundos (10 min)
 )
 
 
@@ -433,10 +448,11 @@ app.add_middleware(
 #   ├── GET  /abel-prize       → Premio Abel
 #   └── GET  /prizes/{qid}     → Premios genéricos (Wikidata)
 
-app.include_router(papers_router)   # Descubrimiento de papers externos
-app.include_router(rag_router)      # Consultas RAG con LLM
-app.include_router(ingest_router)   # Pipeline de ingestión de PDFs
-app.include_router(search_router)   # Búsqueda local y premios científicos
+app.include_router(papers_router)    # Descubrimiento de papers externos
+app.include_router(rag_router)       # Consultas RAG con LLM
+app.include_router(ingest_router)    # Pipeline de ingestión de PDFs
+app.include_router(search_router)    # Búsqueda local y premios científicos
+app.include_router(instagram_router) # Automatización de contenido Instagram
 
 
 # =============================================================================

@@ -155,6 +155,172 @@ Si haces una pregunta sin haber ingestado papers, el sistema no tendra contexto 
 
 ---
 
+## Automatizacion de Instagram
+
+El sistema puede convertir papers ingestados (o recien descubiertos en arXiv) en
+borradores de posts para Instagram: genera el caption en espanol con el LLM
+local y la imagen 1:1 con un backend de Stable Diffusion. Los borradores
+**nunca** se publican solos — se revisan y aprueban desde un dashboard
+Streamlit aparte. La publicacion final usa la Instagram Graph API (cuenta
+Business o Creator).
+
+### Pipeline
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  1. SCHEDULER (opcional, off por defecto)                            │
+│     └── APScheduler dispara cada N minutos                            │
+│                                                                       │
+│  2. PLANNER (app/services/content/planner.py)                        │
+│     └── Elige paper local; si no hay, descubre arXiv por categoria   │
+│                                                                       │
+│  3. GENERATOR (app/services/content/generator.py)                    │
+│     ├── Lee chunks del paper desde LanceDB                           │
+│     └── Llama Ollama (llama3.1:8b) con prompts/instagram_post.md     │
+│         → JSON {hook, caption, hashtags, alt_text, image_prompt}     │
+│                                                                       │
+│  4. RENDERER (app/services/content/renderer.py)                      │
+│     └── POST a Stable Diffusion WebUI (AUTOMATIC1111)                │
+│         → PNG 1080x1080 en data/instagram/images/                    │
+│                                                                       │
+│  5. STORE (app/services/content/store.py)                            │
+│     └── SQLite en data/instagram/posts.sqlite (status=draft)         │
+│                                                                       │
+│  6. DASHBOARD (frontend/instagram_app.py, puerto 8502)               │
+│     └── Preview, regenerar caption/imagen, aprobar, descartar         │
+│                                                                       │
+│  7. PUBLISHER (app/services/content/publisher.py)                    │
+│     └── Solo cuando apruebas con "publish_now" o llamas /publish:    │
+│         POST /{ig-user-id}/media → /media_publish (Graph API v21.0)  │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Requisitos
+
+- **Ollama** corriendo con `llama3.1:8b` (ya requerido por el RAG).
+- **Stable Diffusion WebUI** local con API HTTP habilitada
+  (`./webui.sh --api`). Por defecto en `http://localhost:7860`. Cualquier
+  backend compatible con `POST /sdapi/v1/txt2img` funciona.
+- **Cuenta Instagram Business o Creator** conectada a una Facebook Page,
+  con una Meta App propia y un *long-lived access token* con permisos
+  `instagram_basic`, `instagram_content_publish`, `pages_show_list`.
+- **URL publica** desde la que Meta pueda descargar las imagenes
+  (un tunel tipo `cloudflared`/`ngrok`, o tu CDN). Los archivos se sirven
+  via `GET /api/instagram/images/{filename}`.
+
+> **Nota:** la creacion de la cuenta de Meta y la generacion del token la
+> haces tu manualmente, por seguridad. El sistema solo *consume* el token.
+
+### Configuracion (`.env`)
+
+```bash
+# Scheduler (opcional)
+CONTENT_SCHEDULER_ENABLED=false        # true para auto-generar drafts
+CONTENT_SCHEDULER_INTERVAL_MIN=360     # minutos entre generaciones (>=15)
+
+# Backend de imagen (Stable Diffusion WebUI)
+IMAGE_BASE_URL=http://localhost:7860
+IMAGE_WIDTH=1080
+IMAGE_HEIGHT=1080
+IMAGE_STEPS=28
+IMAGE_SAMPLER=DPM++ 2M Karras
+IMAGE_CFG_SCALE=6.5
+IMAGE_TIMEOUT=180
+# IMAGE_MODEL=                         # opcional: nombre del checkpoint
+
+# Instagram Graph API
+IG_USER_ID=                            # id de la cuenta Business
+IG_ACCESS_TOKEN=                       # long-lived access token
+IG_PUBLIC_BASE_URL=                    # URL publica para servir imagenes
+                                       # ej: https://tu-tunel.example.com
+```
+
+### Flujo de uso
+
+1. Asegurate de tener al menos un paper ingestado (seccion "Ingest" del
+   frontend principal en :8501) o usa `source: arxiv` para descubrir
+   uno nuevo.
+2. Levanta el dashboard de Instagram en otra terminal:
+   ```bash
+   make frontend-instagram   # http://localhost:8502
+   ```
+3. En el sidebar, **Generate**:
+   - `Source: local` — toma cualquier paper indexado sin draft previo.
+   - `Source: arxiv` + `category` (ej. `cs.AI`) — descubre uno reciente.
+   - `arXiv id` o `paper_id` — fija exactamente cual.
+   - `Editorial notes` — instrucciones extras para el LLM.
+4. El draft aparece con preview de imagen, caption y hashtags. Acciones:
+   - **Aprobar** → cambia status a `approved` (no publica).
+   - **Aprobar + publicar** → aprueba y dispara el publisher en background.
+   - **Regenerar caption** / **Regenerar imagen** → reusa el mismo paper.
+   - **Descartar** → marca `rejected`.
+5. Una vez publicado el `permalink` aparece en el panel de detalles.
+
+### Endpoints (`/api/instagram/*`)
+
+| Endpoint | Metodo | Descripcion |
+|----------|--------|-------------|
+| `/api/instagram/drafts` | POST | Generar nuevo draft (body: `GenerateRequest`) |
+| `/api/instagram/drafts` | GET | Listar drafts (filtro `status`, `limit`) |
+| `/api/instagram/drafts/{id}` | GET | Detalle de un draft |
+| `/api/instagram/drafts/{id}` | DELETE | Eliminar draft |
+| `/api/instagram/drafts/{id}/regenerate` | POST | Regenerar caption y/o imagen |
+| `/api/instagram/drafts/{id}/approve` | POST | Aprobar (`publish_now: true` para publicar) |
+| `/api/instagram/drafts/{id}/reject` | POST | Marcar como descartado |
+| `/api/instagram/drafts/{id}/publish` | POST | Publicar en Instagram (sincronico) |
+| `/api/instagram/images/{filename}` | GET | Servir imagen del draft (preview + Graph API) |
+
+Ejemplo cURL:
+
+```bash
+# Generar un draft a partir de un paper local
+curl -X POST http://localhost:3690/api/instagram/drafts \
+     -H "Content-Type: application/json" \
+     -d '{"source": "local"}'
+
+# Generar uno especifico desde arXiv
+curl -X POST http://localhost:3690/api/instagram/drafts \
+     -H "Content-Type: application/json" \
+     -d '{"source": "arxiv", "arxiv_id": "1706.03762"}'
+
+# Listar pendientes de revision
+curl "http://localhost:3690/api/instagram/drafts?status=draft&limit=10"
+```
+
+### Datos persistidos
+
+```
+data/instagram/
+├── posts.sqlite          # Drafts, status, ig_media_id, errores
+└── images/
+    └── {uuid}.png        # Imagenes generadas (1080x1080)
+```
+
+### Troubleshooting
+
+**El sistema no genera nada / cuelga en "Generando…"**
+- Confirma que Ollama esta arriba: `curl http://localhost:11434/api/tags`.
+- Confirma que SD WebUI tiene la API on: `curl http://localhost:7860/sdapi/v1/sd-models`.
+- Subi `IMAGE_TIMEOUT` si tu GPU es lenta.
+
+**El JSON del LLM viene mal formado**
+- El generador hace fallback con regex, pero si vuelve siempre roto, baja
+  `temperature` (en `app/services/content/generator.py`) o cambia a un
+  modelo mas instruct (ej. `qwen2.5:7b-instruct`).
+
+**`Publisher not configured`**
+- Faltan `IG_USER_ID`, `IG_ACCESS_TOKEN` o `IG_PUBLIC_BASE_URL` en `.env`.
+  El draft queda en estado `failed` con el mensaje en `error`.
+
+**Meta responde `Media URL is not accessible`**
+- `IG_PUBLIC_BASE_URL` debe resolver desde internet a tu API. Verifica el
+  tunel: `curl https://<tu-tunel>/api/instagram/images/<archivo>.png`.
+
+**Quiero que el scheduler corra una sola vez al dia**
+- `CONTENT_SCHEDULER_ENABLED=true` y `CONTENT_SCHEDULER_INTERVAL_MIN=1440`.
+
+---
+
 ## Comandos Disponibles
 
 Ejecuta `make help` para ver todos los comandos. Aqui estan organizados por categoria:
@@ -175,6 +341,7 @@ Ejecuta `make help` para ver todos los comandos. Aqui estan organizados por cate
 | `make run-all` | **Iniciar API + Frontend en paralelo** |
 | `make api` | Iniciar solo API (puerto 3690) |
 | `make frontend` | Iniciar solo Frontend (puerto 8501) |
+| `make frontend-instagram` | Iniciar dashboard de drafts Instagram (puerto 8502) |
 | `make dev` | Iniciar API con hot-reload |
 
 ### Testing y Calidad de Codigo
@@ -247,12 +414,22 @@ canela-molida/
 │   │   ├── embeddings.py       # Servicio BGE-M3
 │   │   ├── vectorstore.py      # Servicio LanceDB
 │   │   ├── rag.py              # Pipeline RAG
-│   │   └── pdf_processor.py    # Procesamiento de PDFs
+│   │   ├── pdf_processor.py    # Procesamiento de PDFs
+│   │   └── content/            # Automatizacion Instagram
+│   │       ├── planner.py      # Eleccion de paper (local + arXiv)
+│   │       ├── generator.py    # LLM → caption + image_prompt
+│   │       ├── renderer.py     # Cliente Stable Diffusion
+│   │       ├── publisher.py    # Instagram Graph API
+│   │       ├── store.py        # SQLite repo de drafts
+│   │       └── scheduler.py    # APScheduler (job periodico)
 │   ├── models/                 # Modelos Pydantic
 │   └── core/                   # Configuracion
 │       └── config.py
 ├── frontend/                   # Frontend Streamlit
-│   └── app.py
+│   ├── app.py                  # UI principal RAG (puerto 8501)
+│   └── instagram_app.py        # Dashboard de drafts IG (puerto 8502)
+├── prompts/                    # System prompts editoriales
+│   └── instagram_post.md
 ├── config/                     # Configuracion Docker
 │   ├── docker-compose.yml      # Con GPU
 │   └── docker-compose.cpu.yml  # Solo CPU
@@ -312,6 +489,20 @@ canela-molida/
 | `/api/search/turing-award` | GET | Premios Turing |
 | `/api/search/prizes/{qid}` | GET | Premios por Wikidata Q-ID |
 
+### Instagram (Content Automation)
+
+| Endpoint | Metodo | Descripcion |
+|----------|--------|-------------|
+| `/api/instagram/drafts` | POST | Generar nuevo draft (paper local o arXiv) |
+| `/api/instagram/drafts` | GET | Listar drafts (filtra por `status`) |
+| `/api/instagram/drafts/{id}` | GET | Detalle de un draft |
+| `/api/instagram/drafts/{id}` | DELETE | Eliminar draft |
+| `/api/instagram/drafts/{id}/regenerate` | POST | Regenerar caption y/o imagen |
+| `/api/instagram/drafts/{id}/approve` | POST | Aprobar (opcional `publish_now`) |
+| `/api/instagram/drafts/{id}/reject` | POST | Marcar como descartado |
+| `/api/instagram/drafts/{id}/publish` | POST | Publicar a Instagram |
+| `/api/instagram/images/{filename}` | GET | Servir PNG generado |
+
 ### Sistema
 
 | Endpoint | Metodo | Descripcion |
@@ -327,9 +518,11 @@ canela-molida/
 | Servicio | Puerto | Descripcion |
 |----------|--------|-------------|
 | API FastAPI | 3690 | Backend principal |
-| Frontend Streamlit | 8501 | Interfaz web |
+| Frontend Streamlit (RAG) | 8501 | Interfaz web principal |
+| Frontend Streamlit (Instagram) | 8502 | Dashboard de drafts (`make frontend-instagram`) |
 | Ollama | 11434 | Servidor de modelos LLM |
 | GROBID | 8070 | Extraccion de metadatos PDF |
+| Stable Diffusion WebUI | 7860 | Backend de imagen (opcional, IG) |
 
 ---
 
@@ -354,6 +547,17 @@ cp .env.example .env
 | `CHUNK_OVERLAP` | `200` | Overlap entre chunks |
 | `RETRIEVAL_CACHE_TTL` | `1800` | TTL del cache (segundos) |
 | `SEMANTIC_CACHE_THRESHOLD` | `0.95` | Threshold de similitud para cache |
+| `CONTENT_SCHEDULER_ENABLED` | `false` | Activar generacion automatica de drafts |
+| `CONTENT_SCHEDULER_INTERVAL_MIN` | `360` | Minutos entre generaciones (>=15) |
+| `IMAGE_BASE_URL` | `http://localhost:7860` | Stable Diffusion WebUI URL |
+| `IMAGE_WIDTH` / `IMAGE_HEIGHT` | `1080` | Tamano de la imagen generada |
+| `IMAGE_STEPS` | `28` | Pasos de difusion |
+| `IMAGE_SAMPLER` | `DPM++ 2M Karras` | Sampler de SD |
+| `IMAGE_CFG_SCALE` | `6.5` | Classifier-free guidance |
+| `IMAGE_TIMEOUT` | `180` | Timeout HTTP al SD (segundos) |
+| `IG_USER_ID` | — | Instagram Business account id |
+| `IG_ACCESS_TOKEN` | — | Long-lived access token |
+| `IG_PUBLIC_BASE_URL` | — | URL publica para que Meta descargue imagenes |
 
 ---
 

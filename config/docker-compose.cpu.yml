@@ -54,6 +54,7 @@ services:
       - GROBID_URL=http://grobid:8070
       - EMBEDDING_MODEL=nomic-embed-text
       - LLM_MODEL=qwen2:7b
+      - CORS_ORIGINS=http://localhost:8501,http://frontend:8501,http://localhost:8888
     depends_on:
       ollama:
         condition: service_healthy

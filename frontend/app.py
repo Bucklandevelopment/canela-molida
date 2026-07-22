@@ -133,6 +133,8 @@ Ejecución:
 # ---------------------------------------------------------------------------
 # Streamlit - Framework de UI
 # ---------------------------------------------------------------------------
+import os
+
 import streamlit as st  # El framework principal, importado como 'st' por convención
 
 # ---------------------------------------------------------------------------
@@ -158,8 +160,8 @@ from datetime import datetime  # Para timestamps (no usado actualmente)
 # URL base del backend FastAPI
 # En desarrollo: localhost:3690
 # En Docker: http://api:3690 (nombre del servicio)
-# Configuración externalizable vía st.secrets o variables de entorno
-API_URL = "http://localhost:3690"
+# Configurable vía variable de entorno API_URL
+API_URL = os.getenv("API_URL", "http://localhost:3690")
 
 
 # =============================================================================
@@ -1541,6 +1543,10 @@ def main():
         page_icon="📚",                        # Favicon (emoji o path)
         layout="wide",                         # Usar ancho completo
     )
+
+    # Apply the UTOP.IA canonical dark theme (fonts, neon accents, glass)
+    from ds_theme import inject_design_css
+    inject_design_css(st)
 
     # =========================================================================
     # INICIALIZAR SESSION STATE

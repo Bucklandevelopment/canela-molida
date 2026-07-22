@@ -205,15 +205,21 @@ from app.api.search import router as search_router
 # Prefix: /search
 # Features: Vector search, Nobel Prize, Fields Medal, Turing Award
 
+from app.api.instagram import router as instagram_router
+# instagram_router: Instagram content automation
+# Prefix: /instagram
+# Features: Draft generation, image rendering, approval flow, IG publish
+
 # =============================================================================
 # PUBLIC API
 # =============================================================================
 
 __all__ = [
-    "papers_router",    # /papers - External paper APIs
-    "rag_router",       # /rag - AI/LLM operations
-    "ingest_router",    # /ingest - Document pipeline
-    "search_router",    # /search - Query operations
+    "papers_router",     # /papers - External paper APIs
+    "rag_router",        # /rag - AI/LLM operations
+    "ingest_router",     # /ingest - Document pipeline
+    "search_router",     # /search - Query operations
+    "instagram_router",  # /instagram - Content automation
 ]
 
 # =============================================================================

@@ -1,0 +1,12 @@
+# UTOP.IA Design System — Streamlit theme
+# Copy to each Streamlit app's .streamlit/config.toml
+# (Streamlit's [theme] only supports base color slots + generic font families;
+#  custom fonts, neon borders and glass come from streamlit_theme.inject_design_css.)
+
+[theme]
+base = "dark"
+primaryColor = "#00f0ff"
+backgroundColor = "#0a0e17"
+secondaryBackgroundColor = "#0d1321"
+textColor = "#e8edf5"
+font = "sans serif"

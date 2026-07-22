@@ -47,6 +47,10 @@ diskcache>=5.6.0
 streamlit>=1.30.0
 watchdog>=4.0.0  # Better file watching performance for Streamlit
 
+# === Instagram automation ===
+apscheduler>=3.10.0   # Background scheduler for draft generation
+pillow>=10.0.0        # Image post-processing (resize/optimize)
+
 # === Utilities ===
 python-dotenv>=1.0.0
 tenacity>=8.2.0

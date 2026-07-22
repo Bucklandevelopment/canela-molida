@@ -1,4 +1,7 @@
 {
+  "env": {
+    "ENABLE_LSP_TOOL": "1"
+  },
   "permissions": {
     "allow": [
       "Bash(find:*)",
@@ -10,7 +13,8 @@
       "Bash(ollama pull:*)",
       "Bash(pkill:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(.venv/bin/python -c ' *)"
     ]
   }
 }

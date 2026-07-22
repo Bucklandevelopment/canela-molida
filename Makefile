@@ -106,6 +106,10 @@ frontend: $(VENV)/bin/activate
 	@echo "$(CYAN)Iniciando frontend en http://localhost:8501$(RESET)"
 	$(STREAMLIT) run frontend/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
 
+frontend-instagram: $(VENV)/bin/activate
+	@echo "$(CYAN)Iniciando dashboard Instagram en http://localhost:8502$(RESET)"
+	$(STREAMLIT) run frontend/instagram_app.py --server.port 8502 --server.address 0.0.0.0 --server.headless true
+
 run-all: $(VENV)/bin/activate
 	@echo "$(CYAN)======================================$(RESET)"
 	@echo "$(CYAN)  Iniciando API + Frontend           $(RESET)"
